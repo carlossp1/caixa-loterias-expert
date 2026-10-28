@@ -1,0 +1,76 @@
+{
+  "saved_at": 1793197628.487535,
+  "data": {
+    "numero": 3025,
+    "dataApuracao": "26/10/2026",
+    "listaDezenas": [
+      "03",
+      "10",
+      "29",
+      "32",
+      "36",
+      "41"
+    ],
+    "acumulado": true,
+    "valorEstimadoProximoConcurso": 9800000.0,
+    "dataProximoConcurso": "28/10/2026",
+    "premios": [
+      {
+        "descricaoFaixa": "6 acertos",
+        "faixa": 1,
+        "numeroDeGanhadores": 0,
+        "valorPremio": 0.0
+      },
+      {
+        "descricaoFaixa": "5 acertos",
+        "faixa": 2,
+        "numeroDeGanhadores": 25,
+        "valorPremio": 3632.87
+      },
+      {
+        "descricaoFaixa": "4 acertos",
+        "faixa": 3,
+        "numeroDeGanhadores": 1061,
+        "valorPremio": 97.82
+      },
+      {
+        "descricaoFaixa": "3 acertos",
+        "faixa": 4,
+        "numeroDeGanhadores": 16336,
+        "valorPremio": 3.17
+      },
+      {
+        "descricaoFaixa": "6 acertos",
+        "faixa": 5,
+        "numeroDeGanhadores": 0,
+        "valorPremio": 0.0
+      },
+      {
+        "descricaoFaixa": "5 acertos",
+        "faixa": 6,
+        "numeroDeGanhadores": 7,
+        "valorPremio": 11677.08
+      },
+      {
+        "descricaoFaixa": "4 acertos",
+        "faixa": 7,
+        "numeroDeGanhadores": 714,
+        "valorPremio": 145.37
+      },
+      {
+        "descricaoFaixa": "3 acertos",
+        "faixa": 8,
+        "numeroDeGanhadores": 14929,
+        "valorPremio": 3.47
+      }
+    ],
+    "listaDezenasSegundoSorteio": [
+      "04",
+      "05",
+      "22",
+      "29",
+      "40",
+      "43"
+    ]
+  }
+}

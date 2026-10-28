@@ -1,0 +1,58 @@
+{
+  "saved_at": 1793197628.751396,
+  "data": {
+    "numero": 2460,
+    "dataApuracao": "27/10/2026",
+    "listaDezenas": [
+      "03",
+      "14",
+      "18",
+      "24",
+      "25",
+      "41",
+      "70"
+    ],
+    "acumulado": true,
+    "valorEstimadoProximoConcurso": 23500000.0,
+    "dataProximoConcurso": "29/10/2026",
+    "premios": [
+      {
+        "descricaoFaixa": "7 acertos",
+        "faixa": 1,
+        "numeroDeGanhadores": 0,
+        "valorPremio": 0.0
+      },
+      {
+        "descricaoFaixa": "6 acertos",
+        "faixa": 2,
+        "numeroDeGanhadores": 3,
+        "valorPremio": 54277.09
+      },
+      {
+        "descricaoFaixa": "5 acertos",
+        "faixa": 3,
+        "numeroDeGanhadores": 177,
+        "valorPremio": 1314.21
+      },
+      {
+        "descricaoFaixa": "4 acertos",
+        "faixa": 4,
+        "numeroDeGanhadores": 2917,
+        "valorPremio": 10.5
+      },
+      {
+        "descricaoFaixa": "3 acertos",
+        "faixa": 5,
+        "numeroDeGanhadores": 27861,
+        "valorPremio": 3.5
+      },
+      {
+        "descricaoFaixa": "Time do Coração",
+        "faixa": 6,
+        "numeroDeGanhadores": 11322,
+        "valorPremio": 8.5
+      }
+    ],
+    "nomeTimeCoracaoMesSorte": "VITORIA          /BA"
+  }
+}

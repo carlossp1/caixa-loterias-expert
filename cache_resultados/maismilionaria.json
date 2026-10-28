@@ -1,0 +1,84 @@
+{
+  "saved_at": 1793197628.9164736,
+  "data": {
+    "numero": 401,
+    "dataApuracao": "24/10/2026",
+    "listaDezenas": [
+      "12",
+      "14",
+      "20",
+      "26",
+      "30",
+      "44"
+    ],
+    "acumulado": true,
+    "valorEstimadoProximoConcurso": 109000000.0,
+    "dataProximoConcurso": "28/10/2026",
+    "premios": [
+      {
+        "descricaoFaixa": "6 acertos + 2 trevos",
+        "faixa": 1,
+        "numeroDeGanhadores": 0,
+        "valorPremio": 0.0
+      },
+      {
+        "descricaoFaixa": "6 acertos + 1 ou nenhum trevo",
+        "faixa": 2,
+        "numeroDeGanhadores": 0,
+        "valorPremio": 0.0
+      },
+      {
+        "descricaoFaixa": "5 acertos + 2 trevos",
+        "faixa": 3,
+        "numeroDeGanhadores": 2,
+        "valorPremio": 182352.0
+      },
+      {
+        "descricaoFaixa": "5 acertos + 1 ou nenhum trevo",
+        "faixa": 4,
+        "numeroDeGanhadores": 14,
+        "valorPremio": 11577.91
+      },
+      {
+        "descricaoFaixa": "4 acertos + 2 trevos",
+        "faixa": 5,
+        "numeroDeGanhadores": 86,
+        "valorPremio": 2019.4
+      },
+      {
+        "descricaoFaixa": "4 acertos + 1 ou nenhum trevo",
+        "faixa": 6,
+        "numeroDeGanhadores": 1259,
+        "valorPremio": 137.94
+      },
+      {
+        "descricaoFaixa": "3 acertos + 2 trevos",
+        "faixa": 7,
+        "numeroDeGanhadores": 1715,
+        "valorPremio": 50.0
+      },
+      {
+        "descricaoFaixa": "3 acertos + 1 trevo",
+        "faixa": 8,
+        "numeroDeGanhadores": 13140,
+        "valorPremio": 24.0
+      },
+      {
+        "descricaoFaixa": "2 acertos + 2 trevos",
+        "faixa": 9,
+        "numeroDeGanhadores": 13157,
+        "valorPremio": 12.0
+      },
+      {
+        "descricaoFaixa": "2 acertos + 1 trevo",
+        "faixa": 10,
+        "numeroDeGanhadores": 105307,
+        "valorPremio": 6.0
+      }
+    ],
+    "trevosSorteados": [
+      "1",
+      "4"
+    ]
+  }
+}

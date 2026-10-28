@@ -1,0 +1,52 @@
+{
+  "saved_at": 1793197628.5794585,
+  "data": {
+    "numero": 1333,
+    "dataApuracao": "27/10/2026",
+    "listaDezenas": [
+      "10",
+      "12",
+      "14",
+      "20",
+      "22",
+      "25",
+      "26"
+    ],
+    "acumulado": true,
+    "valorEstimadoProximoConcurso": 800000.0,
+    "dataProximoConcurso": "28/10/2026",
+    "premios": [
+      {
+        "descricaoFaixa": "7 acertos",
+        "faixa": 1,
+        "numeroDeGanhadores": 0,
+        "valorPremio": 0.0
+      },
+      {
+        "descricaoFaixa": "6 acertos",
+        "faixa": 2,
+        "numeroDeGanhadores": 26,
+        "valorPremio": 2792.07
+      },
+      {
+        "descricaoFaixa": "5 acertos",
+        "faixa": 3,
+        "numeroDeGanhadores": 915,
+        "valorPremio": 25.0
+      },
+      {
+        "descricaoFaixa": "4 acertos",
+        "faixa": 4,
+        "numeroDeGanhadores": 12409,
+        "valorPremio": 5.0
+      },
+      {
+        "descricaoFaixa": "Mês da Sorte",
+        "faixa": 5,
+        "numeroDeGanhadores": 42473,
+        "valorPremio": 2.5
+      }
+    ],
+    "nomeMesSorte": "Janeiro"
+  }
+}

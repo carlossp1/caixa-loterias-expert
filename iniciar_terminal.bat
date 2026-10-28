@@ -1,6 +1,8 @@
 @echo off
-title Lotofacil Expert - Terminal CLI
-echo Abrindo Menu Interativo de Analise e Palpites...
+title Caixa Loterias Expert Hub - Terminal CLI
+echo ============================================================
+echo   Iniciando Caixa Loterias Expert Hub (CLI)
+echo ============================================================
 echo.
 py cli.py
 pause

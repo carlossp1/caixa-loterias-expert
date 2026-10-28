@@ -1,37 +1,43 @@
 """
-Servidor Web Local e Dashboard do Especialista em Lotofácil
-Autor: Especialista Lotofácil
+Servidor Web Local e Dashboard do Caixa Loterias Expert Hub
+Autor: Caixa Loterias Expert
 Sem dependências externas - utiliza apenas a biblioteca padrão do Python.
 """
 
 import sys
+import os
 import json
 import webbrowser
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
-from lotofacil_engine import LotofacilStats, LotofacilGenerator
+from urllib.parse import urlparse, parse_qs
+from typing import Dict, Any, List
 
+from lottery_rules import LOTTERIES_CONFIG
+from lottery_engine import LotteryAnalyzer, LotteryGenerator, LotteryClosings, LotteryChecker
+from caixa_api import CaixaLoteriasAPI
+
+# HTML / CSS / JS embutido completo e responsivo
 HTML_CONTENT = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lotofácil Expert - Palpites & Análise Estatística</title>
+    <title>Caixa Loterias Expert - Todas as Loterias Oficiais</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #090d16;
-            --bg-card: #131b2e;
-            --bg-card-hover: #1b2640;
-            --border: #233152;
-            --primary: #10b981;
-            --primary-glow: rgba(16, 185, 129, 0.25);
-            --secondary: #8b5cf6;
+            --bg-main: #0a0e17;
+            --bg-card: #121826;
+            --bg-card-hover: #182236;
+            --border: #202b42;
+            --primary: #209869;
+            --primary-glow: rgba(32, 152, 105, 0.25);
             --accent: #f59e0b;
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
             --danger: #ef4444;
+            --gold: #fbbf24;
         }
 
         * {
@@ -45,35 +51,35 @@ HTML_CONTENT = """<!DOCTYPE html>
             background-color: var(--bg-main);
             color: var(--text-main);
             min-height: 100vh;
-            padding-bottom: 60px;
+            padding-bottom: 70px;
         }
 
         header {
-            background: linear-gradient(180deg, #162038 0%, rgba(9, 13, 22, 0) 100%);
-            padding: 30px 20px 20px 20px;
+            background: linear-gradient(180deg, #172138 0%, rgba(10, 14, 23, 0) 100%);
+            padding: 24px 20px 16px 20px;
             text-align: center;
             border-bottom: 1px solid var(--border);
         }
 
-        .badge-pro {
+        .brand-badge {
             display: inline-block;
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--primary);
-            border: 1px solid var(--primary);
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             padding: 4px 14px;
             border-radius: 999px;
             font-size: 0.8rem;
             font-weight: 700;
+            letter-spacing: 1.5px;
             text-transform: uppercase;
-            letter-spacing: 1px;
             margin-bottom: 10px;
+            color: #38bdf8;
         }
 
         h1 {
-            font-size: 2.3rem;
+            font-size: 2.2rem;
             font-weight: 800;
             letter-spacing: -0.5px;
-            background: linear-gradient(135deg, #ffffff 0%, #a7f3d0 100%);
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -81,46 +87,183 @@ HTML_CONTENT = """<!DOCTYPE html>
         p.subtitle {
             color: var(--text-muted);
             margin-top: 6px;
-            font-size: 1.05rem;
+            font-size: 1rem;
         }
 
         .container {
-            max-width: 1100px;
+            max-width: 1200px;
             margin: 0 auto;
-            padding: 25px 20px;
+            padding: 20px;
         }
 
-        /* Tabs */
+        /* Seletor de Loterias Caixa */
+        .lottery-selector {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 12px;
+            margin-bottom: 24px;
+            scrollbar-width: thin;
+        }
+
+        .lottery-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .lottery-btn:hover {
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .lottery-btn.active {
+            color: #fff;
+            border-color: currentColor;
+            box-shadow: 0 4px 18px var(--primary-glow);
+        }
+
+        .lottery-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        /* Banner de Status da Loteria & Resultado Oficial */
+        .lottery-banner {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-left: 6px solid var(--primary);
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 25px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .banner-info h2 {
+            font-size: 1.6rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .banner-info p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-top: 4px;
+        }
+
+        .banner-result {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 18px;
+            text-align: right;
+            min-width: 300px;
+        }
+
+        .result-title {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .result-contest {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #38bdf8;
+            margin: 2px 0 8px 0;
+        }
+
+        .result-balls {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+
+        .result-ball {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            font-weight: 700;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+
+        .result-ball.clover {
+            background: #10b981;
+            border: 2px solid #34d399;
+        }
+
+        .refresh-api-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            cursor: pointer;
+            text-decoration: underline;
+            margin-top: 4px;
+        }
+
+        .refresh-api-btn:hover {
+            color: #fff;
+        }
+
+        /* Abas de Ação */
         .tabs {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             margin-bottom: 25px;
-            justify-content: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
             flex-wrap: wrap;
         }
 
         .tab-btn {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
+            background: transparent;
+            border: none;
             color: var(--text-muted);
-            padding: 12px 24px;
-            border-radius: 12px;
+            padding: 10px 18px;
             font-size: 1rem;
             font-weight: 600;
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.2s;
         }
 
         .tab-btn:hover {
-            border-color: var(--primary);
-            color: var(--text-main);
+            color: #fff;
+            background: rgba(255,255,255,0.04);
         }
 
         .tab-btn.active {
-            background: var(--primary);
-            border-color: var(--primary);
-            color: #042f2e;
-            box-shadow: 0 0 20px var(--primary-glow);
+            color: #fff;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-bottom: 3px solid var(--primary);
         }
 
         .tab-content {
@@ -129,601 +272,857 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         .tab-content.active {
             display: block;
-            animation: fadeIn 0.3s ease;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(6px); }
-            to { opacity: 1; transform: translateY(0); }
+        /* Layout Grid */
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 25px;
         }
 
-        /* Cards */
-        .card {
+        @media (max-width: 900px) {
+            .grid-layout {
+                grid-template-columns: 1fr;
+            }
+            .lottery-banner {
+                grid-template-columns: 1fr;
+            }
+            .banner-result {
+                text-align: left;
+            }
+            .result-balls {
+                justify-content: flex-start;
+            }
+        }
+
+        .panel-card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border-radius: 14px;
+            padding: 22px;
         }
 
-        .card h2 {
-            font-size: 1.35rem;
+        .panel-card h3 {
+            font-size: 1.2rem;
             font-weight: 700;
-            margin-bottom: 16px;
+            margin-bottom: 15px;
             display: flex;
             align-items: center;
-            gap: 10px;
-        }
-
-        .card h2 span {
-            color: var(--primary);
-        }
-
-        /* Form elements */
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 18px;
-            margin-bottom: 20px;
+            gap: 8px;
         }
 
         .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            margin-bottom: 18px;
         }
 
-        label {
+        .form-group label {
+            display: block;
             font-size: 0.9rem;
             font-weight: 600;
             color: var(--text-muted);
+            margin-bottom: 8px;
         }
 
-        input[type="text"], input[type="number"], select {
-            background: #0b1120;
-            border: 1px solid var(--border);
-            color: var(--text-main);
-            padding: 12px 16px;
-            border-radius: 10px;
-            font-size: 1rem;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        input:focus, select:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 10px var(--primary-glow);
-        }
-
-        .btn {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: #ffffff;
-            border: none;
-            padding: 14px 28px;
-            border-radius: 12px;
-            font-size: 1.05rem;
-            font-weight: 700;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-            box-shadow: 0 4px 15px var(--primary-glow);
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px var(--primary-glow);
-        }
-
-        .btn-secondary {
-            background: #233152;
-            color: var(--text-main);
-            box-shadow: none;
-        }
-
-        .btn-secondary:hover {
-            background: #2e416d;
-            box-shadow: none;
-        }
-
-        /* Volante Interativo Grid (1 a 25) */
-        .volante-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
-            max-width: 440px;
-            margin: 15px auto 20px auto;
-        }
-
-        .volante-ball {
-            aspect-ratio: 1;
-            background: #0b1120;
-            border: 2px solid var(--border);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.15rem;
-            font-weight: 800;
-            color: var(--text-muted);
-            cursor: pointer;
-            user-select: none;
-            transition: all 0.15s ease;
-        }
-
-        .volante-ball:hover {
-            border-color: var(--primary);
-            color: var(--text-main);
-            transform: scale(1.05);
-        }
-
-        .volante-ball.selected {
-            background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
-            border-color: #a78bfa;
-            color: #ffffff;
-            box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
-            transform: scale(1.06);
-        }
-
-        .volante-ball.moldura {
-            position: relative;
-        }
-
-        .volante-ball.moldura::after {
-            content: '';
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background: var(--accent);
-        }
-
-        /* Balls display for generated games */
-        .game-balls {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin: 16px 0;
-        }
-
-        .ball {
-            width: 42px;
-            height: 42px;
-            background: linear-gradient(135deg, #10b981 0%, #047857 100%);
-            color: #ffffff;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 1rem;
-            font-weight: 700;
-            box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
-        }
-
-        .game-card {
-            background: #0d1424;
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 20px;
-            margin-bottom: 18px;
-            transition: border-color 0.2s;
-        }
-
-        .game-card:hover {
-            border-color: var(--primary);
-        }
-
-        .game-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 12px;
-        }
-
-        .score-pill {
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--primary);
-            border: 1px solid var(--primary);
-            padding: 4px 12px;
-            border-radius: 999px;
-            font-weight: 800;
-            font-size: 0.95rem;
-        }
-
-        .badges {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 10px;
-        }
-
-        .badge {
-            background: #1e293b;
-            color: var(--text-muted);
-            font-size: 0.8rem;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .badge b {
-            color: var(--text-main);
-        }
-
-        .feedbacks-list {
-            margin-top: 14px;
-            padding-top: 12px;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            font-size: 0.88rem;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .feedback-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .tag-excelente { color: var(--primary); font-weight: 700; }
-        .tag-bom { color: var(--accent); font-weight: 700; }
-        .tag-alerta { color: var(--danger); font-weight: 700; }
-
-        .actions-row {
-            display: flex;
-            gap: 10px;
-            margin-top: 14px;
-        }
-
-        .btn-sm {
-            padding: 8px 14px;
-            font-size: 0.85rem;
-            border-radius: 8px;
-        }
-
-        /* Rules summary table */
-        .rules-table {
+        .form-control {
             width: 100%;
-            border-collapse: collapse;
+            background: #090d15;
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+        }
+
+        /* Volante Interativo */
+        .volante-container {
             margin-top: 15px;
         }
 
-        .rules-table th, .rules-table td {
-            text-align: left;
-            padding: 12px;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.95rem;
-        }
-
-        .rules-table th {
-            color: var(--text-muted);
+        .volante-label {
+            font-size: 0.85rem;
             font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
         }
 
-        .rules-table tr:hover td {
-            background: rgba(255, 255, 255, 0.02);
-        }
-
-        /* Toast notification */
-        #toast {
-            position: fixed;
-            bottom: 25px;
-            right: 25px;
-            background: var(--primary);
-            color: #042f2e;
-            padding: 14px 24px;
+        .volante-grid {
+            display: grid;
+            gap: 6px;
+            background: #090d15;
+            padding: 12px;
             border-radius: 10px;
-            font-weight: 700;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-            opacity: 0;
-            transform: translateY(20px);
-            transition: all 0.3s ease;
-            pointer-events: none;
-            z-index: 999;
+            border: 1px solid var(--border);
+            max-height: 380px;
+            overflow-y: auto;
         }
 
-        #toast.show {
-            opacity: 1;
-            transform: translateY(0);
+        .num-btn {
+            background: #141c2c;
+            border: 1px solid #233152;
+            color: #e2e8f0;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+            user-select: none;
+        }
+
+        .num-btn:hover {
+            border-color: var(--primary);
+            color: #fff;
+        }
+
+        .num-btn.fixed {
+            background: #059669 !important;
+            border-color: #34d399 !important;
+            color: #fff !important;
+        }
+
+        .num-btn.excluded {
+            background: #dc2626 !important;
+            border-color: #f87171 !important;
+            color: #fff !important;
+            opacity: 0.6;
+        }
+
+        .num-btn.selected {
+            background: var(--primary) !important;
+            border-color: #fff !important;
+            color: #fff !important;
+            transform: scale(1.05);
+        }
+
+        .volante-legend {
+            display: flex;
+            gap: 14px;
+            font-size: 0.75rem;
+            margin-top: 8px;
+            color: var(--text-muted);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .legend-box {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        /* Super Sete - Matriz Vertical */
+        .supersete-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+        }
+
+        .col-supersete {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            text-align: center;
+        }
+
+        .col-title {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        /* Botões de Ação */
+        .btn-primary {
+            width: 100%;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            padding: 14px 20px;
+            border-radius: 10px;
+            font-size: 1.05rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 15px var(--primary-glow);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 15px;
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.15);
+            transform: translateY(-2px);
+        }
+
+        /* Cards de Palpites Gerados */
+        .games-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+        .game-card {
+            background: #0e1422;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 15px;
+            transition: all 0.2s;
+        }
+
+        .game-card:hover {
+            border-color: rgba(255,255,255,0.2);
+            transform: translateY(-2px);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .card-number {
+            font-weight: 800;
+            font-size: 1rem;
+            color: #fff;
+        }
+
+        .score-pill {
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 999px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .balls-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .ball {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: #172138;
+            border: 1px solid var(--border);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.95rem;
+            font-weight: 700;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        .ball.hit {
+            background: #eab308 !important;
+            border-color: #fef08a !important;
+            color: #000 !important;
+            font-weight: 900 !important;
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.6) !important;
+        }
+
+        .card-stats {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            border-top: 1px solid rgba(255,255,255,0.06);
+            padding-top: 8px;
+        }
+
+        .stat-badge {
+            background: rgba(255,255,255,0.04);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .extras-badge {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 8px;
+            display: inline-block;
+        }
+
+        /* Auditor */
+        .audit-result-box {
+            background: #090d15;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .score-circle {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 4px solid var(--primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px auto;
+        }
+
+        .score-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+        }
+
+        .score-lbl {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .bullet-list {
+            list-style: none;
+            margin-top: 12px;
+            font-size: 0.9rem;
+        }
+
+        .bullet-list li {
+            padding: 6px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .bullet-list li.alert {
+            color: #f87171;
+        }
+
+        .bullet-list li.praise {
+            color: #4ade80;
+        }
+
+        /* Fechamento Info */
+        .closing-badge {
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+
+        /* Export Bar */
+        .export-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-secondary {
+            background: #172138;
+            color: #fff;
+            border: 1px solid var(--border);
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: #233152;
+        }
+
+        .empty-placeholder {
+            text-align: center;
+            padding: 50px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-icon {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            opacity: 0.5;
         }
     </style>
 </head>
 <body>
 
     <header>
-        <div class="badge-pro">Algoritmo Estatístico V2.5</div>
-        <h1>LOTOFÁCIL EXPERT</h1>
-        <p class="subtitle">Otimização probabilística e palpites matematicamente calibrados</p>
+        <div class="brand-badge">Caixa Loterias Expert Hub</div>
+        <h1>Especialista em Loterias da Caixa</h1>
+        <p class="subtitle">Análise Estatística Avançada, Palpites Calibrados, Fechamentos Matemáticos e Auditor de Volantes</p>
     </header>
 
     <div class="container">
-        <!-- Tabs de navegação -->
+        <!-- Barra de Seleção de Loterias -->
+        <div class="lottery-selector" id="lotterySelector"></div>
+
+        <!-- Banner com a Loteria Ativa e Último Resultado Oficial -->
+        <div class="lottery-banner" id="lotteryBanner">
+            <div class="banner-info">
+                <h2 id="bannerTitle">Carregando...</h2>
+                <p id="bannerSlogan"></p>
+                <p id="bannerRules" style="font-size: 0.85rem; color: #38bdf8; margin-top: 6px;"></p>
+            </div>
+            <div class="banner-result">
+                <div class="result-title">Último Concurso Oficial Caixa</div>
+                <div class="result-contest" id="resContest">Concurso ---</div>
+                <div class="result-balls" id="resBalls"></div>
+                <div id="resExtras"></div>
+                <div style="font-size: 0.85rem; font-weight: 700; color: #4ade80; margin-top: 4px;" id="resPrize"></div>
+                <button class="refresh-api-btn" onclick="fetchLatestResult(true)">🔄 Atualizar Resultado da Caixa</button>
+            </div>
+        </div>
+
+        <!-- Abas do Módulo -->
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('gerador')">🎯 Gerador de Palpites</button>
-            <button class="tab-btn" onclick="switchTab('fechamento')">📦 Fechamento (Desdobramento)</button>
-            <button class="tab-btn" onclick="switchTab('auditor')">🔍 Auditar Meu Jogo</button>
-            <button class="tab-btn" onclick="switchTab('regras')">📊 Os 5 Pilares de Ouro</button>
+            <button class="tab-btn active" onclick="switchTab('generator')">🎲 Gerador de Palpites</button>
+            <button class="tab-btn" onclick="switchTab('closings')">🔒 Fechamentos Reduzidos</button>
+            <button class="tab-btn" onclick="switchTab('auditor')">🩺 Raio-X & Auditor</button>
+            <button class="tab-btn" onclick="switchTab('checker')">🏆 Conferidor de Apostas</button>
         </div>
 
-        <!-- ABA 1: GERADOR DE PALPITES -->
-        <div id="tab-gerador" class="tab-content active">
-            <div class="card">
-                <h2><span>🎯</span> Gerar Palpites Certeiros</h2>
-                <p style="color: var(--text-muted); margin-bottom: 18px;">
-                    Todos os jogos gerados são submetidos a 8 filtros rigorosos (Pares/Ímpares, Moldura/Miolo, Primos, Fibonacci, Soma e Repetição).
-                </p>
-
-                <div class="form-grid">
+        <!-- TAB 1: GERADOR EXPERT -->
+        <div class="tab-content active" id="tab-generator">
+            <div class="grid-layout">
+                <div class="panel-card">
+                    <h3>⚙️ Configuração do Jogo</h3>
+                    
                     <div class="form-group">
-                        <label for="gen-qtd">Quantidade de Jogos</label>
-                        <select id="gen-qtd">
-                            <option value="1">1 Jogo Calibrado</option>
-                            <option value="3" selected>3 Jogos (Recomendado)</option>
-                            <option value="5">5 Jogos Estratégicos</option>
-                            <option value="10">10 Jogos</option>
+                        <label>Quantidade de Palpites:</label>
+                        <select class="form-control" id="genCount">
+                            <option value="1">1 Jogo Otimizado</option>
+                            <option value="3">3 Jogos Otimizados</option>
+                            <option value="5" selected>5 Jogos Otimizados</option>
+                            <option value="10">10 Jogos Otimizados</option>
+                            <option value="15">15 Jogos Otimizados</option>
                         </select>
                     </div>
 
                     <div class="form-group">
-                        <label for="gen-last">Último Concurso (15 números para medir repetência)</label>
-                        <input type="text" id="gen-last" placeholder="Ex: 01 02 04 06 09 10 11 13 14 16 18 20 21 23 25">
+                        <label>Dezenas por Cartão:</label>
+                        <select class="form-control" id="genPickSize"></select>
                     </div>
 
-                    <div class="form-group">
-                        <label for="gen-fixed">Dezenas FIXAS (Opcional - ex: 05 13)</label>
-                        <input type="text" id="gen-fixed" placeholder="Dezenas que você quer em todos os jogos">
+                    <div class="volante-container">
+                        <div class="volante-label">
+                            <span>Volante Estratégico (Opcional):</span>
+                            <span id="volanteCounter" style="color: #38bdf8;">0 fixos / 0 excluídos</span>
+                        </div>
+                        <div class="volante-legend">
+                            <div class="legend-item"><div class="legend-box" style="background: #059669;"></div> Fixo (1 clique)</div>
+                            <div class="legend-item"><div class="legend-box" style="background: #dc2626;"></div> Excluído (2 cliques)</div>
+                            <div class="legend-item"><div class="legend-box" style="background: #141c2c;"></div> Livre (3 cliques)</div>
+                        </div>
+                        <div class="volante-grid" id="genVolante"></div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="gen-excluded">Dezenas EXCLUÍDAS (Opcional - ex: 04 22)</label>
-                        <input type="text" id="gen-excluded" placeholder="Dezenas que você NÃO quer em nenhum jogo">
-                    </div>
+                    <button class="btn-primary" onclick="generateGames()">
+                        <span>✨ Gerar Palpites Certeiros</span>
+                    </button>
                 </div>
 
-                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                    <button class="btn" onclick="gerarPalpites()">⚡ Gerar Palpites Otimizados</button>
-                    <button class="btn btn-secondary" onclick="preencherExemplo()">💡 Preencher com Exemplo</button>
+                <div class="panel-card">
+                    <div class="games-header">
+                        <h3>📋 Palpites Calibrados (<span id="gamesCountBadge">0</span>)</h3>
+                        <div class="export-actions" id="exportActions" style="display: none;">
+                            <button class="btn-secondary" onclick="copyGames()">📋 Copiar</button>
+                            <button class="btn-secondary" onclick="downloadTxt()">💾 Baixar TXT</button>
+                        </div>
+                    </div>
+
+                    <div id="gamesContainer">
+                        <div class="empty-placeholder">
+                            <div class="empty-icon">🎯</div>
+                            <p>Configure seus filtros à esquerda e clique em <b>Gerar Palpites Certeiros</b> para receber jogos balanceados com o algoritmo da Caixa Loterias Expert.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
-
-            <div id="results-palpites"></div>
         </div>
 
-        <!-- ABA 2: FECHAMENTO / DESDOBRAMENTO -->
-        <div id="tab-fechamento" class="tab-content">
-            <div class="card">
-                <h2><span>📦</span> Desdobramento / Fechamento Matemático</h2>
-                <p style="color: var(--text-muted);">
-                    Selecione de <b>16 a 21 dezenas</b> abaixo. O motor criará os volantes de 15 números que maximizam a cobertura combinatória e atendem aos filtros estatísticos.
+        <!-- TAB 2: FECHAMENTOS INTELIGENTES -->
+        <div class="tab-content" id="tab-closings">
+            <div class="grid-layout">
+                <div class="panel-card">
+                    <h3>📐 Montar Fechamento</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">
+                        Selecione as dezenas que você deseja combinar no volante abaixo. O motor calculará uma matriz reduzida de alta cobertura.
+                    </p>
+                    
+                    <div class="volante-label">
+                        <span>Dezenas Selecionadas:</span>
+                        <span id="closingSelectedCount" style="color: #38bdf8; font-weight: 700;">0 dezenas</span>
+                    </div>
+                    <div class="volante-grid" id="closingVolante"></div>
+
+                    <button class="btn-primary" onclick="generateClosing()">
+                        <span>🔒 Calcular Desdobramento</span>
+                    </button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="games-header">
+                        <h3>Matriz de Fechamento</h3>
+                        <div class="export-actions" id="closingExportActions" style="display: none;">
+                            <button class="btn-secondary" onclick="copyClosingGames()">📋 Copiar</button>
+                        </div>
+                    </div>
+                    <div id="closingInfoBadge"></div>
+                    <div id="closingGamesContainer">
+                        <div class="empty-placeholder">
+                            <div class="empty-icon">📐</div>
+                            <p>Selecione um grupo de dezenas no volante e calcule um fechamento para obter a maior probabilidade com menor custo de apostas.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: AUDITOR (RAIO-X) -->
+        <div class="tab-content" id="tab-auditor">
+            <div class="grid-layout">
+                <div class="panel-card">
+                    <h3>🩺 Teste seu Próprio Jogo</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">
+                        Marque as dezenas no volante para receber a nota do seu jogo (0 a 100) baseada nos padrões históricos de sorteio da Caixa.
+                    </p>
+
+                    <div class="volante-label">
+                        <span>Dezenas Marcadas:</span>
+                        <span id="auditSelectedCount" style="color: #38bdf8; font-weight: 700;">0 marcadas</span>
+                    </div>
+                    <div class="volante-grid" id="auditVolante"></div>
+
+                    <button class="btn-primary" onclick="auditManualGame()">
+                        <span>🔍 Auditar Volante</span>
+                    </button>
+                </div>
+
+                <div class="panel-card">
+                    <h3>Raio-X Estatístico</h3>
+                    <div id="auditResultContainer">
+                        <div class="empty-placeholder">
+                            <div class="empty-icon">📊</div>
+                            <p>Marque as dezenas da sua aposta para verificar se você está jogando com alta probabilidade ou cometendo erros clássicos (como excesso de pares, números seguidos ou somas improváveis).</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: CONFERIDOR DE APOSTAS -->
+        <div class="tab-content" id="tab-checker">
+            <div class="panel-card">
+                <h3>🏆 Conferência de Jogos contra Concurso Oficial</h3>
+                <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 20px;">
+                    Confira instantaneamente os palpites gerados ou fechamentos contra as dezenas sorteadas pela Caixa Econômica Federal.
                 </p>
 
-                <div style="text-align: center; margin: 15px 0;">
-                    <span style="font-size: 1.1rem; font-weight: 700; color: var(--primary);">
-                        Dezenas Selecionadas: <span id="count-fechamento">0</span> / 25
-                    </span>
-                    <span style="color: var(--text-muted); font-size: 0.9rem; margin-left: 10px;">(Mínimo 16, Máximo 21)</span>
+                <div style="margin-bottom: 20px;">
+                    <button class="btn-primary" style="max-width: 300px;" onclick="checkAllGeneratedGames()">
+                        <span>⚡ Conferir Meus Palpites Agora</span>
+                    </button>
                 </div>
 
-                <!-- Volante Interativo para Fechamento -->
-                <div class="volante-grid" id="volante-fechamento"></div>
-
-                <div class="form-grid" style="max-width: 500px; margin: 0 auto 20px auto;">
-                    <div class="form-group">
-                        <label for="fech-max">Quantidade de Volantes a Gerar</label>
-                        <select id="fech-max">
-                            <option value="6">6 Volantes Econômicos</option>
-                            <option value="8" selected>8 Volantes (Equilibrado)</option>
-                            <option value="12">12 Volantes (Maior Cobertura)</option>
-                            <option value="16">16 Volantes</option>
-                        </select>
+                <div id="checkerResultsContainer">
+                    <div class="empty-placeholder">
+                        <div class="empty-icon">🥇</div>
+                        <p>Gere palpites ou fechamentos na aba do Gerador e clique em <b>Conferir Meus Palpites Agora</b> para ver quantos acertos cada bilhete teria feito no concurso oficial!</p>
                     </div>
                 </div>
-
-                <div style="text-align: center;">
-                    <button class="btn" onclick="executarFechamento()">🧩 Gerar Fechamento Reduzido</button>
-                    <button class="btn btn-secondary" onclick="limparFechamento()">Limpar Seleção</button>
-                </div>
-            </div>
-
-            <div id="results-fechamento"></div>
-        </div>
-
-        <!-- ABA 3: AUDITOR DE VOLANTE -->
-        <div id="tab-auditor" class="tab-content">
-            <div class="card">
-                <h2><span>🔍</span> Auditoria Completa de Volante</h2>
-                <p style="color: var(--text-muted);">
-                    Clique exatamente em <b>15 dezenas</b> no volante abaixo para receber uma análise profunda e a nota de probabilidade do seu jogo.
-                </p>
-
-                <div style="text-align: center; margin: 15px 0;">
-                    <span style="font-size: 1.1rem; font-weight: 700; color: var(--primary);">
-                        Dezenas Marcadas: <span id="count-auditor">0</span> / 15
-                    </span>
-                </div>
-
-                <div class="volante-grid" id="volante-auditor"></div>
-
-                <div style="text-align: center;">
-                    <button class="btn" onclick="auditarJogo()">🔬 Auditar Este Jogo</button>
-                    <button class="btn btn-secondary" onclick="limparAuditor()">Limpar Volante</button>
-                </div>
-            </div>
-
-            <div id="results-auditor"></div>
-        </div>
-
-        <!-- ABA 4: REGRAS E DICAS -->
-        <div id="tab-regras" class="tab-content">
-            <div class="card">
-                <h2><span>📊</span> Os Filtros de Ouro da Lotofácil</h2>
-                <p style="color: var(--text-muted); line-height: 1.6;">
-                    A Lotofácil não é sorte pura: os resultados seguem leis da física estatística e da distribuição combinatória. Veja as métricas que se repetem em mais de 80% de todos os concursos da história:
-                </p>
-
-                <table class="rules-table">
-                    <thead>
-                        <tr>
-                            <th>Métrica</th>
-                            <th>Faixa de Ouro (Maior Incidência)</th>
-                            <th>Frequência Histórica</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><b>Pares e Ímpares</b></td>
-                            <td>8 Ímpares e 7 Pares ou 7 Ímpares e 8 Pares</td>
-                            <td>~57% de todos os concursos</td>
-                        </tr>
-                        <tr>
-                            <td><b>Repetidas do Anterior</b></td>
-                            <td>8, 9 ou 10 dezenas do concurso passado</td>
-                            <td>~62% (média perfeita é 9)</td>
-                        </tr>
-                        <tr>
-                            <td><b>Moldura vs. Miolo</b></td>
-                            <td>10 na moldura / 5 no miolo (ou 9/6)</td>
-                            <td>~58% das extrações</td>
-                        </tr>
-                        <tr>
-                            <td><b>Números Primos</b></td>
-                            <td>5 ou 6 primos (entre 02,03,05,07,11,13,17,19,23)</td>
-                            <td>~54% dos concursos</td>
-                        </tr>
-                        <tr>
-                            <td><b>Soma Total</b></td>
-                            <td>Entre 175 e 205 (média teórica: 195)</td>
-                            <td>~75% dos concursos</td>
-                        </tr>
-                        <tr>
-                            <td><b>Sequência Máxima</b></td>
-                            <td>No máximo 4 ou 5 dezenas seguidas</td>
-                            <td>~85% dos concursos</td>
-                        </tr>
-                    </tbody>
-                </table>
             </div>
         </div>
+
     </div>
 
-    <div id="toast">Ação concluída com sucesso!</div>
-
     <script>
-        const MOLDURA = [1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25];
+        let lotteriesConfig = {};
+        let currentLotteryId = "megasena";
+        let currentLottery = null;
+        let latestResult = null;
 
-        let selectedFechamento = new Set();
-        let selectedAuditor = new Set();
+        // Estado do Gerador
+        let fixedNumbers = new Set();
+        let excludedNumbers = new Set();
+        let generatedGames = [];
 
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-            
-            event.target.classList.add('active');
-            document.getElementById(`tab-${tabName}`).classList.add('active');
-        }
+        // Estado do Fechamento
+        let closingSelected = new Set();
+        let closingGames = [];
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }
+        // Estado do Auditor
+        let auditSelected = new Set();
 
-        // Monta volante interativo
-        function buildVolante(containerId, selectedSet, countId, maxLimit) {
-            const container = document.getElementById(containerId);
-            container.innerHTML = '';
-            for (let i = 1; i <= 25; i++) {
-                const ball = document.createElement('div');
-                ball.className = 'volante-ball' + (MOLDURA.includes(i) ? ' moldura' : '');
-                ball.textContent = String(i).padStart(2, '0');
-                ball.onclick = () => {
-                    if (selectedSet.has(i)) {
-                        selectedSet.delete(i);
-                        ball.classList.remove('selected');
-                    } else {
-                        if (maxLimit && selectedSet.size >= maxLimit) {
-                            showToast(`Limite de ${maxLimit} dezenas atingido!`);
-                            return;
-                        }
-                        selectedSet.add(i);
-                        ball.classList.add('selected');
-                    }
-                    document.getElementById(countId).textContent = selectedSet.size;
-                };
-                container.appendChild(ball);
+        async function init() {
+            try {
+                const res = await fetch('/api/lotteries');
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                lotteriesConfig = await res.json();
+                renderLotterySelector();
+                selectLottery('megasena');
+            } catch (e) {
+                console.error("Erro ao carregar loterias:", e);
+                document.getElementById('bannerTitle').innerText = "Erro ao Carregar";
+                document.getElementById('bannerSlogan').innerText = "Falha ao obter lista de loterias: " + e.message;
             }
         }
 
-        function renderGameCard(game, title) {
-            const ballsHtml = game.numeros.map(n => `<div class="ball">${String(n).padStart(2, '0')}</div>`).join('');
-            const feedbacksHtml = game.feedbacks.map(f => {
-                const cls = f[0] === 'Excelente' ? 'tag-excelente' : (f[0] === 'Bom' ? 'tag-bom' : 'tag-alerta');
-                return `<div class="feedback-item"><span class="${cls}">[${f[0]}]</span> <span>${f[1]}</span></div>`;
-            }).join('');
-
-            const numbersText = game.numeros.map(n => String(n).padStart(2, '0')).join(' ');
-
-            return `
-                <div class="game-card">
-                    <div class="game-header">
-                        <span style="font-size: 1.15rem; font-weight: 700; color: var(--text-main);">${title}</span>
-                        <span class="score-pill">Nota: ${game.score}/100</span>
-                    </div>
-                    <div class="game-balls">${ballsHtml}</div>
-                    <div class="badges">
-                        <div class="badge">P/I: <b>${game.pares}/${game.impares}</b></div>
-                        <div class="badge">Moldura: <b>${game.moldura}/16</b></div>
-                        <div class="badge">Miolo: <b>${game.miolo}/9</b></div>
-                        <div class="badge">Primos: <b>${game.primos}</b></div>
-                        <div class="badge">Fib: <b>${game.fibonacci}</b></div>
-                        <div class="badge">Soma: <b>${game.soma}</b></div>
-                        ${game.repetidas_ultimo !== null ? `<div class="badge">Repetidas: <b>${game.repetidas_ultimo}</b></div>` : ''}
-                    </div>
-                    <div class="feedbacks-list">${feedbacksHtml}</div>
-                    <div class="actions-row">
-                        <button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('${numbersText}'); showToast('Dezenas copiadas!');">📋 Copiar Dezenas</button>
-                    </div>
-                </div>
-            `;
+        function renderLotterySelector() {
+            const container = document.getElementById('lotterySelector');
+            container.innerHTML = '';
+            for (const [id, cfg] of Object.entries(lotteriesConfig)) {
+                const btn = document.createElement('button');
+                btn.className = `lottery-btn ${id === currentLotteryId ? 'active' : ''}`;
+                btn.id = `btn-lottery-${id}`;
+                btn.style.setProperty('--primary-glow', cfg.color_primary + '40');
+                btn.innerHTML = `<span class="lottery-dot" style="color: ${cfg.color_primary};"></span> ${cfg.name}`;
+                btn.onclick = () => selectLottery(id);
+                container.appendChild(btn);
+            }
         }
 
-        function preencherExemplo() {
-            document.getElementById('gen-last').value = "01 02 04 05 08 09 11 13 14 16 18 20 21 22 25";
-            document.getElementById('gen-fixed').value = "05 13";
-            document.getElementById('gen-excluded').value = "07";
-            showToast('Dados de exemplo preenchidos!');
+        function selectLottery(id) {
+            currentLotteryId = id;
+            currentLottery = lotteriesConfig[id];
+
+            // Atualiza botões
+            document.querySelectorAll('.lottery-btn').forEach(b => b.classList.remove('active'));
+            const activeBtn = document.getElementById(`btn-lottery-${id}`);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            // Aplica cor primária
+            document.documentElement.style.setProperty('--primary', currentLottery.color_primary);
+            document.documentElement.style.setProperty('--primary-glow', currentLottery.color_primary + '40');
+
+            // Atualiza banner
+            document.getElementById('bannerTitle').innerText = currentLottery.name;
+            document.getElementById('bannerSlogan').innerText = currentLottery.slogan;
+            document.getElementById('bannerRules').innerText = `Aposta padrão: ${currentLottery.default_pick} números (mínimo ${currentLottery.min_pick}, máximo ${currentLottery.max_pick}). Faixa: ${currentLottery.min_number} a ${currentLottery.max_number}.`;
+
+            // Atualiza opções de Dezenas por Cartão
+            const pickSelect = document.getElementById('genPickSize');
+            pickSelect.innerHTML = '';
+            for (let i = currentLottery.min_pick; i <= currentLottery.max_pick; i++) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.innerText = `${i} dezenas ${i === currentLottery.default_pick ? '(Padrão)' : ''}`;
+                if (i === currentLottery.default_pick) opt.selected = true;
+                pickSelect.appendChild(opt);
+            }
+
+            // Reseta seleções
+            fixedNumbers.clear();
+            excludedNumbers.clear();
+            closingSelected.clear();
+            auditSelected.clear();
+            generatedGames = [];
+            closingGames = [];
+
+            updateVolanteCounters();
+            renderVolantes();
+            renderGamesList();
+
+            // Busca resultado oficial
+            fetchLatestResult(false);
         }
 
-        async function gerarPalpites() {
-            const qtd = parseInt(document.getElementById('gen-qtd').value);
-            const lastRaw = document.getElementById('gen-last').value;
-            const fixedRaw = document.getElementById('gen-fixed').value;
-            const exclRaw = document.getElementById('gen-excluded').value;
+        async function fetchLatestResult(forceRefresh = false) {
+            const ballsContainer = document.getElementById('resBalls');
+            ballsContainer.innerHTML = '<span style="font-size:0.8rem;color:#94a3b8;">Buscando...</span>';
 
-            const parseList = (str) => {
-                if (!str.trim()) return [];
-                return str.replace(/[,;-]/g, ' ').split(/\s+/).map(Number).filter(n => n >= 1 && n <= 25);
-            };
+            try {
+                const res = await fetch(`/api/latest-result?lottery=${currentLotteryId}&refresh=${forceRefresh}`);
+                latestResult = await res.json();
+
+                document.getElementById('resContest').innerText = `Concurso ${latestResult.numero || '---'} (${latestResult.dataApuracao || ''})`;
+                
+                ballsContainer.innerHTML = '';
+                const dezenas = latestResult.listaDezenas || [];
+                dezenas.forEach(d => {
+                    const b = document.createElement('div');
+                    b.className = 'result-ball';
+                    b.innerText = d;
+                    ballsContainer.appendChild(b);
+                });
+
+                // Trevos se for +Milionária
+                const extrasContainer = document.getElementById('resExtras');
+                extrasContainer.innerHTML = '';
+                if (latestResult.trevosSorteados) {
+                    const trevosHtml = latestResult.trevosSorteados.map(t => `<span class="result-ball clover">🍀${t}</span>`).join(' ');
+                    extrasContainer.innerHTML = `<div style="display:flex;gap:4px;justify-content:flex-end;margin-top:4px;">${trevosHtml}</div>`;
+                } else if (latestResult.nomeMesSorte) {
+                    extrasContainer.innerHTML = `<span style="font-size:0.8rem;color:#f59e0b;">Mês: ${latestResult.nomeMesSorte}</span>`;
+                } else if (latestResult.nomeTimeCoracaoMesSorte) {
+                    extrasContainer.innerHTML = `<span style="font-size:0.8rem;color:#4ade80;">Time: ${latestResult.nomeTimeCoracaoMesSorte}</span>`;
+                }
+
+                // Prêmio estimado
+                const estimativa = latestResult.valorEstimadoProximoConcurso;
+                if (estimativa && estimativa > 0) {
+                    const fmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(estimativa);
+                    document.getElementById('resPrize').innerText = (latestResult.acumulado ? 'Acumulou! Estimativa: ' : 'Estimativa: ') + fmt;
+                } else {
+                    document.getElementById('resPrize').innerText = '';
+                }
+
+            } catch (e) {
+                console.error("Erro na API da Caixa:", e);
+                ballsContainer.innerHTML = '<span style="color:#f87171;font-size:0.8rem;">Modo Offline</span>';
+            }
+        }
+
+        function renderVolantes() {
+            renderGenVolante();
+            renderClosingVolante();
+            renderAuditVolante();
+        }
+
+        function renderGenVolante() {
+            const container = document.getElementById('genVolante');
+            container.innerHTML = '';
+            
+            const minN = currentLottery.min_number;
+            const maxN = currentLottery.max_number;
+            const cols = currentLottery.layout_cols || 10;
+            container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+            for (let n = minN; n <= maxN; n++) {
+                const btn = document.createElement('div');
+                btn.className = 'num-btn';
+                const formatted = (minN === 0 && n < 10) ? `0${n}` : (n < 10 ? `0${n}` : `${n}`);
+                btn.innerText = formatted;
+
+                if (fixedNumbers.has(n)) btn.classList.add('fixed');
+                if (excludedNumbers.has(n)) btn.classList.add('excluded');
+
+                btn.onclick = () => {
+                    if (!fixedNumbers.has(n) && !excludedNumbers.has(n)) {
+                        fixedNumbers.add(n);
+                    } else if (fixedNumbers.has(n)) {
+                        fixedNumbers.delete(n);
+                        excludedNumbers.add(n);
+                    } else {
+                        excludedNumbers.delete(n);
+                    }
+                    updateVolanteCounters();
+                    renderGenVolante();
+                };
+
+                container.appendChild(btn);
+            }
+        }
+
+        function renderClosingVolante() {
+            const container = document.getElementById('closingVolante');
+            container.innerHTML = '';
+            
+            const minN = currentLottery.min_number;
+            const maxN = currentLottery.max_number;
+            const cols = currentLottery.layout_cols || 10;
+            container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+            for (let n = minN; n <= maxN; n++) {
+                const btn = document.createElement('div');
+                btn.className = 'num-btn';
+                const formatted = (minN === 0 && n < 10) ? `0${n}` : (n < 10 ? `0${n}` : `${n}`);
+                btn.innerText = formatted;
+
+                if (closingSelected.has(n)) btn.classList.add('selected');
+
+                btn.onclick = () => {
+                    if (closingSelected.has(n)) {
+                        closingSelected.delete(n);
+                    } else {
+                        closingSelected.add(n);
+                    }
+                    document.getElementById('closingSelectedCount').innerText = `${closingSelected.size} dezenas selecionadas`;
+                    renderClosingVolante();
+                };
+
+                container.appendChild(btn);
+            }
+        }
+
+        function renderAuditVolante() {
+            const container = document.getElementById('auditVolante');
+            container.innerHTML = '';
+            
+            const minN = currentLottery.min_number;
+            const maxN = currentLottery.max_number;
+            const cols = currentLottery.layout_cols || 10;
+            container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+            for (let n = minN; n <= maxN; n++) {
+                const btn = document.createElement('div');
+                btn.className = 'num-btn';
+                const formatted = (minN === 0 && n < 10) ? `0${n}` : (n < 10 ? `0${n}` : `${n}`);
+                btn.innerText = formatted;
+
+                if (auditSelected.has(n)) btn.classList.add('selected');
+
+                btn.onclick = () => {
+                    if (auditSelected.has(n)) {
+                        auditSelected.delete(n);
+                    } else {
+                        auditSelected.add(n);
+                    }
+                    document.getElementById('auditSelectedCount').innerText = `${auditSelected.size} marcadas`;
+                    renderAuditVolante();
+                };
+
+                container.appendChild(btn);
+            }
+        }
+
+        function updateVolanteCounters() {
+            document.getElementById('volanteCounter').innerText = `${fixedNumbers.size} fixos / ${excludedNumbers.size} excluídos`;
+        }
+
+        async function generateGames() {
+            const count = parseInt(document.getElementById('genCount').value);
+            const pickSize = parseInt(document.getElementById('genPickSize').value);
 
             const payload = {
-                count: qtd,
-                lastContest: parseList(lastRaw),
-                fixed: parseList(fixedRaw),
-                excluded: parseList(exclRaw)
+                lottery_id: currentLotteryId,
+                count: count,
+                pick_size: pickSize,
+                fixed_numbers: Array.from(fixedNumbers),
+                excluded_numbers: Array.from(excludedNumbers),
+                min_score: 75
             };
-
-            const container = document.getElementById('results-palpites');
-            container.innerHTML = '<p style="color: var(--primary); text-align: center; margin: 20px 0;">⚡ Processando combinatória e filtros...</p>';
 
             try {
                 const res = await fetch('/api/generate', {
@@ -731,242 +1130,435 @@ HTML_CONTENT = """<!DOCTYPE html>
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                const data = await res.json();
-                
-                if (data.error) {
-                    container.innerHTML = `<div class="game-card" style="border-color: var(--danger);"><p style="color: var(--danger);">${data.error}</p></div>`;
-                    return;
-                }
-
-                let html = '<div style="margin: 20px 0; display: flex; justify-content: space-between; align-items: center;">';
-                html += `<h3 style="font-size: 1.2rem;">${data.length} Palpites Otimizados Prontos:</h3>`;
-                html += `<button class="btn btn-secondary btn-sm" onclick="downloadTXT('palpites')">💾 Baixar Todos em TXT</button></div>`;
-
-                window.lastGenerated = data;
-                data.forEach((p, idx) => {
-                    html += renderGameCard(p, `Palpite Especialista #${idx + 1}`);
-                });
-
-                container.innerHTML = html;
-            } catch (err) {
-                container.innerHTML = `<div class="game-card"><p style="color: var(--danger);">Falha de conexão: ${err.message}</p></div>`;
+                generatedGames = await res.json();
+                renderGamesList();
+            } catch (e) {
+                alert("Erro ao gerar palpites: " + e);
             }
         }
 
-        async function executarFechamento() {
-            if (selectedFechamento.size < 16 || selectedFechamento.size > 21) {
-                showToast('Selecione entre 16 e 21 dezenas no volante acima!');
+        function renderGamesList() {
+            const container = document.getElementById('gamesContainer');
+            const countBadge = document.getElementById('gamesCountBadge');
+            const exportActions = document.getElementById('exportActions');
+
+            countBadge.innerText = generatedGames.length;
+
+            if (generatedGames.length === 0) {
+                exportActions.style.display = 'none';
+                container.innerHTML = `
+                    <div class="empty-placeholder">
+                        <div class="empty-icon">🎯</div>
+                        <p>Configure seus filtros à esquerda e clique em <b>Gerar Palpites Certeiros</b> para receber jogos balanceados com o algoritmo da Caixa Loterias Expert.</p>
+                    </div>`;
                 return;
             }
 
-            const maxGames = parseInt(document.getElementById('fech-max').value);
-            const container = document.getElementById('results-fechamento');
-            container.innerHTML = '<p style="color: var(--primary); text-align: center; margin: 20px 0;">🧩 Calculando cobertura e desdobrando volantes...</p>';
+            exportActions.style.display = 'flex';
+            container.innerHTML = '';
+
+            generatedGames.forEach((game, idx) => {
+                const card = document.createElement('div');
+                card.className = 'game-card';
+
+                const ballsHtml = game.numbers.map(n => {
+                    const formatted = (n < 10 && currentLottery.min_number === 0) ? `0${n}` : (n < 10 ? `0${n}` : `${n}`);
+                    return `<div class="ball">${formatted}</div>`;
+                }).join('');
+
+                let extrasHtml = '';
+                if (game.extras) {
+                    if (game.extras.trevos) {
+                        extrasHtml = `<div class="extras-badge">🍀 Trevos: ${game.extras.trevos.join(' e ')}</div>`;
+                    } else if (game.extras.mes_da_sorte) {
+                        extrasHtml = `<div class="extras-badge">📅 Mês: ${game.extras.mes_da_sorte}</div>`;
+                    } else if (game.extras.time_do_coracao) {
+                        extrasHtml = `<div class="extras-badge">⚽ Time: ${game.extras.time_do_coracao}</div>`;
+                    }
+                }
+
+                card.innerHTML = `
+                    <div class="card-top">
+                        <div class="card-number">Jogo #${idx + 1}</div>
+                        <div class="score-pill" style="background: ${game.level_color}25; color: ${game.level_color}; border: 1px solid ${game.level_color};">
+                            Score ${game.score}% • ${game.level}
+                        </div>
+                    </div>
+                    <div class="balls-row">${ballsHtml}</div>
+                    ${extrasHtml}
+                    <div class="card-stats">
+                        <span class="stat-badge">Soma: ${game.soma}</span>
+                        <span class="stat-badge">Pares: ${game.pares} | Ímpares: ${game.impares}</span>
+                        <span class="stat-badge">Primos: ${game.primos}</span>
+                        <span class="stat-badge">Max Seq: ${game.max_consecutive}</span>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function generateClosing() {
+            if (closingSelected.size < currentLottery.default_pick) {
+                alert(`Para desdobrar na ${currentLottery.name}, selecione no mínimo ${currentLottery.default_pick} dezenas no volante.`);
+                return;
+            }
+
+            const payload = {
+                lottery_id: currentLotteryId,
+                selected_numbers: Array.from(closingSelected),
+                ticket_size: currentLottery.default_pick,
+                max_tickets: 10
+            };
 
             try {
-                const res = await fetch('/api/fechamento', {
+                const res = await fetch('/api/closing', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        pool: Array.from(selectedFechamento),
-                        maxGames: maxGames
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
+                closingGames = data.tickets || [];
 
-                if (data.error) {
-                    container.innerHTML = `<div class="game-card" style="border-color: var(--danger);"><p style="color: var(--danger);">${data.error}</p></div>`;
-                    return;
-                }
+                document.getElementById('closingInfoBadge').innerHTML = `
+                    <div class="closing-badge">
+                        ✨ <b>${data.guarantee}</b> | Cobertura estimada: <b>${data.coverage_percentage}%</b>
+                    </div>
+                `;
+                document.getElementById('closingExportActions').style.display = 'flex';
 
-                window.lastFechamento = data;
-                let html = `<div style="margin: 20px 0; display: flex; justify-content: space-between; align-items: center;">`;
-                html += `<h3 style="font-size: 1.2rem;">Fechamento com ${data.length} Volantes:</h3>`;
-                html += `<button class="btn btn-secondary btn-sm" onclick="downloadTXT('fechamento')">💾 Baixar Volantes em TXT</button></div>`;
+                const container = document.getElementById('closingGamesContainer');
+                container.innerHTML = '';
 
-                data.forEach((j, idx) => {
-                    html += renderGameCard(j, `Volante Desdobrado #${idx + 1}`);
+                closingGames.forEach((game, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'game-card';
+                    const ballsHtml = game.numbers.map(n => `<div class="ball">${n < 10 ? '0' + n : n}</div>`).join('');
+                    card.innerHTML = `
+                        <div class="card-top">
+                            <div class="card-number">Volante #${idx + 1}</div>
+                            <div class="score-pill" style="background: ${game.level_color}25; color: ${game.level_color};">Score ${game.score}%</div>
+                        </div>
+                        <div class="balls-row">${ballsHtml}</div>
+                    `;
+                    container.appendChild(card);
                 });
 
-                container.innerHTML = html;
-            } catch (err) {
-                container.innerHTML = `<div class="game-card"><p style="color: var(--danger);">Erro: ${err.message}</p></div>`;
+            } catch (e) {
+                alert("Erro ao gerar fechamento: " + e);
             }
         }
 
-        async function auditarJogo() {
-            if (selectedAuditor.size !== 15) {
-                showToast(`Marque exatamente 15 dezenas (atualmente: ${selectedAuditor.size})!`);
+        async function auditManualGame() {
+            if (auditSelected.size === 0) {
+                alert("Selecione os números do seu jogo no volante para auditar.");
                 return;
             }
 
-            const container = document.getElementById('results-auditor');
-            container.innerHTML = '<p style="color: var(--primary); text-align: center; margin: 20px 0;">🔬 Auditando seu jogo...</p>';
+            const payload = {
+                lottery_id: currentLotteryId,
+                numbers: Array.from(auditSelected)
+            };
 
             try {
                 const res = await fetch('/api/audit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ numbers: Array.from(selectedAuditor) })
+                    body: JSON.stringify(payload)
                 });
-                const data = await res.json();
-                container.innerHTML = renderGameCard(data, 'Diagnóstico Estatístico do seu Jogo');
-            } catch (err) {
-                container.innerHTML = `<div class="game-card"><p style="color: var(--danger);">Erro: ${err.message}</p></div>`;
+                const analysis = await res.json();
+                renderAuditResult(analysis);
+            } catch (e) {
+                alert("Erro ao auditar jogo: " + e);
             }
         }
 
-        function limparFechamento() {
-            selectedFechamento.clear();
-            document.querySelectorAll('#volante-fechamento .volante-ball').forEach(b => b.classList.remove('selected'));
-            document.getElementById('count-fechamento').textContent = '0';
-            document.getElementById('results-fechamento').innerHTML = '';
+        function renderAuditResult(analysis) {
+            const container = document.getElementById('auditResultContainer');
+            
+            const alertsHtml = (analysis.alerts || []).map(a => `<li class="alert">⚠️ ${a}</li>`).join('');
+            const praisesHtml = (analysis.praises || []).map(p => `<li class="praise">✅ ${p}</li>`).join('');
+
+            container.innerHTML = `
+                <div class="audit-result-box">
+                    <div class="score-circle" style="border-color: ${analysis.level_color};">
+                        <div class="score-value" style="color: ${analysis.level_color};">${analysis.score}</div>
+                        <div class="score-lbl">Pontos</div>
+                    </div>
+                    <div style="text-align: center; font-weight: 800; font-size: 1.1rem; color: ${analysis.level_color}; margin-bottom: 12px;">
+                        ${analysis.level}
+                    </div>
+                    <div class="card-stats" style="justify-content: center; margin-bottom: 15px;">
+                        <span class="stat-badge">Total Dezenas: ${analysis.total_numbers}</span>
+                        <span class="stat-badge">Soma: ${analysis.soma}</span>
+                        <span class="stat-badge">Pares: ${analysis.pares} | Ímpares: ${analysis.impares}</span>
+                        <span class="stat-badge">Primos: ${analysis.primos}</span>
+                    </div>
+                    <ul class="bullet-list">
+                        ${praisesHtml}
+                        ${alertsHtml}
+                    </ul>
+                </div>
+            `;
         }
 
-        function limparAuditor() {
-            selectedAuditor.clear();
-            document.querySelectorAll('#volante-auditor .volante-ball').forEach(b => b.classList.remove('selected'));
-            document.getElementById('count-auditor').textContent = '0';
-            document.getElementById('results-auditor').innerHTML = '';
-        }
+        async function checkAllGeneratedGames() {
+            if (!latestResult || !latestResult.listaDezenas || latestResult.listaDezenas.length === 0) {
+                alert("Aguarde o carregamento do resultado oficial ou atualize o concurso.");
+                return;
+            }
 
-        function downloadTXT(type) {
-            const list = type === 'palpites' ? window.lastGenerated : window.lastFechamento;
-            if (!list || !list.length) return;
+            const gamesToCheck = generatedGames.length > 0 ? generatedGames : closingGames;
+            if (gamesToCheck.length === 0) {
+                alert("Nenhum palpite gerado ainda! Gere jogos na aba Gerador antes de conferir.");
+                return;
+            }
 
-            let text = `=== LOTOFÁCIL EXPERT - ${type.toUpperCase()} ===\\n\\n`;
-            list.forEach((item, idx) => {
-                text += `Jogo #${idx + 1} (Score: ${item.score}/100):\\n`;
-                text += item.numeros.map(n => String(n).padStart(2, '0')).join(' ') + '\\n';
-                text += `Pares/Ímpares: ${item.pares}/${item.impares} | Moldura: ${item.moldura} | Primos: ${item.primos} | Soma: ${item.soma}\\n\\n`;
+            const container = document.getElementById('checkerResultsContainer');
+            container.innerHTML = '<p style="color: #38bdf8;">Conferindo apostas contra o concurso oficial...</p>';
+
+            const drawnNumbers = latestResult.listaDezenas.map(d => parseInt(d));
+            const results = [];
+
+            for (const g of gamesToCheck) {
+                const res = await fetch('/api/check-ticket', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        lottery_id: currentLotteryId,
+                        ticket_numbers: g.numbers,
+                        drawn_numbers: drawnNumbers,
+                        ticket_extras: g.extras,
+                        drawn_extras: latestResult
+                    })
+                });
+                const checkData = await res.json();
+                results.push({ game: g, check: checkData });
+            }
+
+            container.innerHTML = '';
+            results.forEach((item, idx) => {
+                const g = item.game;
+                const c = item.check;
+
+                const card = document.createElement('div');
+                card.className = 'game-card';
+                if (c.premiado) {
+                    card.style.borderColor = '#fbbf24';
+                    card.style.background = 'rgba(251, 191, 36, 0.05)';
+                }
+
+                const ballsHtml = g.numbers.map(n => {
+                    const isHit = c.dezenas_acertadas.includes(n);
+                    const formatted = (n < 10) ? `0${n}` : `${n}`;
+                    return `<div class="ball ${isHit ? 'hit' : ''}">${formatted}</div>`;
+                }).join('');
+
+                const badgeColor = c.premiado ? '#fbbf24' : '#94a3b8';
+                card.innerHTML = `
+                    <div class="card-top">
+                        <div class="card-number">Bilhete #${idx + 1}</div>
+                        <div class="score-pill" style="background: ${badgeColor}20; color: ${badgeColor}; border: 1px solid ${badgeColor};">
+                            ${c.acertos} Acertos • ${c.faixa}
+                        </div>
+                    </div>
+                    <div class="balls-row">${ballsHtml}</div>
+                `;
+                container.appendChild(card);
             });
-
-            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `${type}_lotofacil.txt`;
-            link.click();
-            showToast('Arquivo TXT baixado com sucesso!');
         }
 
-        // Inicializa volantes na carga
-        window.onload = () => {
-            buildVolante('volante-fechamento', selectedFechamento, 'count-fechamento', 21);
-            buildVolante('volante-auditor', selectedAuditor, 'count-auditor', 15);
-        };
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+        }
+
+        function copyGames() {
+            if (generatedGames.length === 0) return;
+            const text = generatedGames.map((g, i) => `Jogo ${i+1}: ` + g.numbers.map(n => n < 10 ? '0' + n : n).join(' - ')).join('\\n');
+            navigator.clipboard.writeText(text);
+            alert("Jogos copiados para a área de transferência!");
+        }
+
+        function copyClosingGames() {
+            if (closingGames.length === 0) return;
+            const text = closingGames.map((g, i) => `Volante ${i+1}: ` + g.numbers.map(n => n < 10 ? '0' + n : n).join(' - ')).join('\\n');
+            navigator.clipboard.writeText(text);
+            alert("Fechamento copiado para a área de transferência!");
+        }
+
+        function downloadTxt() {
+            if (generatedGames.length === 0) return;
+            let content = `=== CAIXA LOTERIAS EXPERT ===\\n`;
+            content += `Modalidade: ${currentLottery.name}\\n`;
+            content += `Total de Jogos: ${generatedGames.length}\\n\\n`;
+            generatedGames.forEach((g, i) => {
+                content += `Jogo ${i+1} [Score: ${g.score}%]: ` + g.numbers.map(n => n < 10 ? '0' + n : n).join(' ') + `\\n`;
+            });
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `palpites_${currentLotteryId}.txt`;
+            a.click();
+        }
+
+        window.onload = init;
     </script>
 </body>
 </html>
 """
 
-class LotofacilServerHandler(BaseHTTPRequestHandler):
-    def _send_json(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+class LotteryRequestHandler(BaseHTTPRequestHandler):
+
+    def _set_headers(self, content_type="application/json", status=200):
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
+        self.send_header("Content-Type", content_type)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
-        self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self._set_headers(status=200)
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/" or parsed.path == "/index.html":
-            body = HTML_CONTENT.encode('utf-8')
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_error(404, "Arquivo não encontrado")
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if path in ["/", "/index.html"]:
+            self._set_headers(content_type="text/html; charset=utf-8")
+            self.wfile.write(HTML_CONTENT.encode("utf-8"))
+            return
+
+        elif path == "/api/lotteries":
+            self._set_headers()
+            def json_safe_helper(o):
+                if isinstance(o, (set, tuple)):
+                    return list(o)
+                return str(o)
+            self.wfile.write(json.dumps(LOTTERIES_CONFIG, default=json_safe_helper, ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif path == "/api/latest-result":
+            lottery_id = query.get("lottery", ["megasena"])[0]
+            force = query.get("refresh", ["false"])[0].lower() == "true"
+            data = CaixaLoteriasAPI.get_latest_result(lottery_id, force_refresh=force)
+            self._set_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            return
+
+        self._set_headers(status=404)
+        self.wfile.write(b'{"error": "Not found"}')
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        content_len = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_len).decode('utf-8')
-        data = json.loads(body) if body else {}
+        path = parsed.path
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
 
-        if parsed.path == "/api/generate":
-            try:
-                qtd = int(data.get("count", 3))
-                fixed = data.get("fixed", [])
-                excluded = data.get("excluded", [])
-                last = data.get("lastContest", [])
-                last_contest = last if len(last) == 15 else None
-                
-                palpites = LotofacilGenerator.generate_palpites(
-                    qtd=qtd,
-                    fixed=fixed,
-                    excluded=excluded,
-                    last_contest=last_contest
-                )
-                self._send_json(palpites)
-            except Exception as e:
-                self._send_json({"error": str(e)}, status=400)
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+        except Exception:
+            payload = {}
 
-        elif parsed.path == "/api/fechamento":
-            try:
-                pool = data.get("pool", [])
-                max_games = int(data.get("maxGames", 8))
-                last = data.get("lastContest", [])
-                last_contest = last if len(last) == 15 else None
+        if path == "/api/generate":
+            lottery_id = payload.get("lottery_id", "megasena")
+            count = int(payload.get("count", 5))
+            pick_size = payload.get("pick_size")
+            fixed = payload.get("fixed_numbers", [])
+            excluded = payload.get("excluded_numbers", [])
+            min_score = int(payload.get("min_score", 75))
 
-                jogos = LotofacilGenerator.fechamento(
-                    pool=pool,
-                    max_games=max_games,
-                    last_contest=last_contest
-                )
-                self._send_json(jogos)
-            except Exception as e:
-                self._send_json({"error": str(e)}, status=400)
+            games = LotteryGenerator.generate_batch(
+                lottery_id=lottery_id,
+                count=count,
+                pick_size=pick_size,
+                fixed_numbers=fixed,
+                excluded_numbers=excluded,
+                min_score=min_score
+            )
+            self._set_headers()
+            self.wfile.write(json.dumps(games, ensure_ascii=False).encode("utf-8"))
+            return
 
-        elif parsed.path == "/api/audit":
-            try:
-                numbers = data.get("numbers", [])
-                if len(numbers) != 15:
-                    self._send_json({"error": "Exatamente 15 dezenas são necessárias"}, status=400)
-                    return
-                analysis = LotofacilStats.analyze_game(numbers)
-                self._send_json(analysis)
-            except Exception as e:
-                self._send_json({"error": str(e)}, status=400)
-        else:
-            self.send_error(404, "Endpoint não encontrado")
+        elif path == "/api/closing":
+            lottery_id = payload.get("lottery_id", "megasena")
+            selected = payload.get("selected_numbers", [])
+            size = payload.get("ticket_size")
+            max_tickets = int(payload.get("max_tickets", 10))
 
-    def log_message(self, format, *args):
-        # Desabilita logs barulhentos no console para manter o terminal limpo
-        pass
+            closing = LotteryClosings.generate_closing(
+                lottery_id=lottery_id,
+                selected_numbers=selected,
+                ticket_size=size,
+                max_tickets=max_tickets
+            )
+            self._set_headers()
+            self.wfile.write(json.dumps(closing, ensure_ascii=False).encode("utf-8"))
+            return
 
-def run_server(port=5050):
-    server_address = ('127.0.0.1', port)
-    try:
-        httpd = HTTPServer(server_address, LotofacilServerHandler)
-    except OSError:
-        port = 5051
-        server_address = ('127.0.0.1', port)
-        httpd = HTTPServer(server_address, LotofacilServerHandler)
+        elif path == "/api/audit":
+            lottery_id = payload.get("lottery_id", "megasena")
+            numbers = payload.get("numbers", [])
+            analysis = LotteryAnalyzer.analyze_game(lottery_id, numbers)
+            self._set_headers()
+            self.wfile.write(json.dumps(analysis, ensure_ascii=False).encode("utf-8"))
+            return
 
-    url = f"http://localhost:{port}"
-    print(f"\n=======================================================")
-    print(f"  LOTOFACIL EXPERT - PAINEL WEB INICIADO COM SUCESSO!")
-    print(f"  Acesse no navegador: {url}")
-    print(f"=======================================================\n")
-    print("Pressione Ctrl+C para encerrar o servidor a qualquer momento.\n")
+        elif path == "/api/check-ticket":
+            lottery_id = payload.get("lottery_id", "megasena")
+            t_nums = payload.get("ticket_numbers", [])
+            d_nums = payload.get("drawn_numbers", [])
+            t_extras = payload.get("ticket_extras")
+            d_extras = payload.get("drawn_extras")
 
-    # Abre o navegador automaticamente
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+            result = LotteryChecker.check_ticket(
+                lottery_id=lottery_id,
+                ticket_numbers=t_nums,
+                drawn_numbers=d_nums,
+                ticket_extras=t_extras,
+                drawn_extras=d_extras
+            )
+            self._set_headers()
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+            return
+
+        self._set_headers(status=404)
+        self.wfile.write(b'{"error": "Not found"}')
+
+
+def run_server(port=5050, open_browser=True):
+    env_port = os.environ.get("PORT")
+    is_cloud = env_port is not None
+    effective_port = int(env_port) if is_cloud else port
+
+    server_address = ("0.0.0.0", effective_port)
+    httpd = HTTPServer(server_address, LotteryRequestHandler)
+    print(f"============================================================")
+    print(f"  CAIXA LOTERIAS EXPERT HUB")
+    print(f"  Mega-Sena, Lotofácil, Quina, Lotomania, Dupla Sena,")
+    print(f"  Dia de Sorte, Timemania, +Milionária e Super Sete")
+    print(f"============================================================")
+    print(f"  Servidor rodando em: http://0.0.0.0:{effective_port}")
+    if is_cloud:
+        print(f"  Modo Nuvem (Render / Web Service) ativo na porta {effective_port}")
+    else:
+        print(f"  Acesse no navegador: http://localhost:{effective_port}")
+    print(f"  Pressione Ctrl+C para encerrar o servidor.")
+    print(f"============================================================")
+
+    if open_browser and not is_cloud:
+        threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{effective_port}")).start()
 
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nServidor finalizado.")
+        print("\nEncerrando servidor...")
         httpd.server_close()
+        sys.exit(0)
 
 if __name__ == "__main__":
-    port = 5050
-    if len(sys.argv) > 1:
-        try:
-            port = int(sys.argv[1])
-        except ValueError:
-            pass
-    run_server(port)
+    run_server()
